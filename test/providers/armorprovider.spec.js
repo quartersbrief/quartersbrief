@@ -1,7 +1,7 @@
-import ArmorProvider from '../../src/providers/armorprovider.js';
-import mockfs from 'mock-fs';
+import { vol } from 'memfs';
+import esmock from 'esmock';
 import sinon from 'sinon';
-import { readFileSync, writeFileSync } from 'fs';
+import fs from 'fs';
 import path from 'path';
 import Ship from '../../src/model/ship.js';
 
@@ -11,13 +11,20 @@ describe('ArmorProvider', function() {
 	const CACHE_DIR = '/cache';
 
 	let provider;
-
+	let ArmorProvider;
 	let TEST_DATA;
 
 
 	before(function() {
-		TEST_DATA = JSON.parse(readFileSync('test/armor/testdata/armor.json'));
+		TEST_DATA = JSON.parse(fs.readFileSync('test/armor/testdata/armor.json'));
 	});
+
+	before(async function() {
+		ArmorProvider = (await esmock.strict('../../src/providers/armorprovider.js', {}, {
+			'fs': vol,
+			'fs/promises': vol.promisesApi
+		})).default;
+	})
 
 	beforeEach(function() {
 		provider = new ArmorProvider(ARMOR_DIR, CACHE_DIR, {
@@ -68,7 +75,7 @@ describe('ArmorProvider', function() {
 		});
 
 		beforeEach(function() {
-			mockfs({
+			vol.fromNestedJSON({
 				[ARMOR_DIR]: {
 					[`${baseDesignator}.json`]: JSON.stringify(TEST_DATA)
 				},
@@ -76,18 +83,20 @@ describe('ArmorProvider', function() {
 			}, { createCwd: false });
 		});
 
-		afterEach(mockfs.restore);
+		afterEach(function() {
+			vol.reset() 
+		});
 		
 		it('should read a cached view if one is available', async function() {
 			const view = 'side';
 			const designator = `${baseDesignator}.${view}`;
 
-			writeFileSync(path.format({
+			vol.writeFileSync(path.format({
 				dir: CACHE_DIR,
 				name: designator,
 				ext: '.json'
 			}), JSON.stringify(CACHE_DATA));
-			
+
 			expect(provider.supplier.viewer.view).to.not.have.been.called;
 			return expect(provider.supplier.recover(designator)).to.eventually.deep.equal(CACHE_DATA);
 		});
@@ -115,7 +124,7 @@ describe('ArmorProvider', function() {
 			const view = 'side';
 			const designator = `${baseDesignator}.${view}`;
 
-			writeFileSync(path.format({
+			vol.writeFileSync(path.format({
 				dir: CACHE_DIR,
 				name: designator,
 				ext: '.json'
@@ -144,11 +153,18 @@ describe('ArmorProvider', function() {
 			result.view = await result.view;
 
 			// Check that cache file has been updated
-			expect(path.format({
-				dir: CACHE_DIR,
-				name: designator,
-				ext: '.json'
-			})).to.be.a.file().with.contents(JSON.stringify(result));
+			try {
+				const contents = await vol.promises.readFile(path.format({
+					dir: CACHE_DIR,
+					name: designator,
+					ext: '.json'
+				}), 'utf8');
+				expect(contents).to.equal(JSON.stringify(result));
+			} catch (err) {
+				if (err.code === 'ENOENT')
+					expect.fail('Expected cache file to have been written but it was not');
+				else throw err;
+			}
 		})
 	});
 });

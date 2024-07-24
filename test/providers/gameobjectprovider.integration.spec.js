@@ -1,4 +1,6 @@
-import GameObjectProvider from '../../src/providers/gameobjectprovider.js';
+const GameObjectProvider = (await esmock('../../src/providers/gameobjectprovider.js', {}, {
+	'fs': vol, 'fs/promises': vol.promisesApi
+})).default;
 
 import Consumable from '../../src/model/consumable.js';
 import Gun from '../../src/model/gun.js';
@@ -7,8 +9,8 @@ import Torpedoes from '../../src/model/modules/torpedoes.js';
 import Hull from '../../src/model/modules/hull.js';
 import Engine from '../../src/model/modules/engine.js';
 
-import mockfs from 'mock-fs';
-import fs from 'fs';
+import { vol } from 'memfs';
+import esmock from 'esmock';
 import path from 'path';
 import omit from 'lodash/omit.js';
 
@@ -26,8 +28,8 @@ describe('GameObjectProvider @integration', function() {
 				name: obj.name,
 				ext: '.json'
 			});
-			fs.writeFileSync(master, JSON.stringify(obj));
-			[ 'index', 'id' ].forEach(link => obj[link] && fs.linkSync(master, path.format({ // For convenience, allow index and/or id to be absent. Then we just won't create that link.
+			vol.writeFileSync(master, JSON.stringify(obj));
+			[ 'index', 'id' ].forEach(link => obj[link] && vol.linkSync(master, path.format({ // For convenience, allow index and/or id to be absent. Then we just won't create that link.
 				dir: SOURCEPATH,
 				name: obj[link],
 				ext: '.json'
@@ -55,13 +57,13 @@ describe('GameObjectProvider @integration', function() {
 			}
 		}
 		beforeEach(function() {
-			mockfs({
+			vol.fromNestedJSON({
 				[SOURCEPATH]: {}
 			});
 		});
 
 		afterEach(function() {
-			mockfs.restore();
+			vol.reset();
 		});
 
 		// eslint-disable-next-line mocha/no-setup-in-describe
@@ -157,9 +159,11 @@ describe('GameObjectProvider @integration', function() {
 
 					const result = (await gameObjectProvider.createGameObject(ship.name))._data.AB1_Artillery._data;
 
-					expect(result).to
-						.have.property('HP_AGM_1')
-						.that.is.an.instanceOf(Gun);
+					expect(result).to.have.property('HP_AGM_1')
+					// esmock messes with the constructor references, so the one imported by esmock in GameObjectProvider
+					// and the one imported at the top of this file are not identical.
+					// As a workaround (aka ugly hack), we just check that their string representations are the same.
+					expect(result.HP_AGM_1.constructor.toString()).to.equal(Gun.toString());
 					expect(result.HP_AGM_1._data).to
 						.deep.equal(artillery.AB1_Artillery.HP_AGM_1);
 				});
@@ -194,7 +198,7 @@ describe('GameObjectProvider @integration', function() {
 					{ kind: 'Hull', cls: Hull },
 					{ kind: 'Engine', cls: Engine }
 				].forEach(({ kind, cls }) =>
-					it(`should convert ${kind[0].toLowerCase() + kind.slice(1)} modules into ${cls.name} objects`, async function() {
+					it(`should convert ${kind[0].toLowerCase() + kind.slice(1)} modules into ${cls?.name} objects`, async function() {
 						const ship = Object.assign({}, SHIP, {
 							[kind]: FIXTURES[kind]
 						});
@@ -202,7 +206,11 @@ describe('GameObjectProvider @integration', function() {
 
 						const result = (await gameObjectProvider.createGameObject(ship.name))._data;
 
-						expect(result).to.have.property(kind).that.is.an.instanceOf(cls);
+						expect(result).to.have.property(kind);
+						// esmock messes with the constructor references, so the one imported by esmock in GameObjectProvider
+						// and the one imported at the top of this file are not identical.
+						// As a workaround (aka ugly hack), we just check that their string representations are the same.
+						expect(result[kind].constructor.toString()).to.equal(cls.toString());
 						expect(result[kind]._data).to.not.be.empty;
 					}));					
 			});
@@ -226,7 +234,10 @@ describe('GameObjectProvider @integration', function() {
 
 					const result = (await gameObjectProvider.createGameObject(ship.name))._data.ShipAbilities.AbilitySlot0.abils[0];
 
-					expect(result).to.be.an.instanceOf(Consumable);
+					// esmock messes with the constructor references, so the one imported by esmock in GameObjectProvider
+					// and the one imported at the top of this file are not identical.
+					// As a workaround (aka ugly hack), we just check that their string representations are the same.
+					expect(result.constructor.toString()).to.equal(Consumable.toString());
 					expect(result._data).to.deep.equal(Object.assign({}, consumable, consumable.flavor));
 				});
 			});

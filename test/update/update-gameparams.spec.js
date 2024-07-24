@@ -1,5 +1,4 @@
-import * as _steps from '../../src/update/infra/steps.js';
-import mockfs from 'mock-fs';
+import { vol } from 'memfs';
 import esmock from 'esmock';
 import path from 'path';
 import sinon from 'sinon';
@@ -28,8 +27,8 @@ describe('updateGameParams', function() {
 	beforeEach(function() {
 		extract = sinon.stub().callsFake(function(wows, dest, build, resource) {
 			return sinon.stub().callsFake(async function() {
-				await fs.mkdir(path.dirname(path.join(os.tmpdir(), resource)));
-				await fs.writeFile(path.join(os.tmpdir(), resource), data);
+				await vol.promisesApi.mkdir(path.dirname(path.join(os.tmpdir(), resource)), { recursive: true });
+				await vol.promisesApi.writeFile(path.join(os.tmpdir(), resource), data);
 				return Promise.resolve([ path.join(os.tmpdir(), resource) ]);
 			});
 		});
@@ -44,18 +43,21 @@ describe('updateGameParams', function() {
 	
 	beforeEach(async function() {
 		const steps = {
-			..._steps,
+			...await esmock.strict('../../src/update/infra/steps.js', {}, { 'fs': vol, 'fs/promises': vol.promisesApi }),
 			extract
 		}
 		// Use esmock strict mode here, to that invariants get replaced instead of merged
-		updateGameParams = (await esmock.strict('../../src/update/update-gameparams.js', {}, {
+		updateGameParams = (await esmock.strict('../../src/update/update-gameparams.js', {
 				'../../src/update/infra/steps.js': steps,
 				'../../src/update/invariants-gameparams.js': invariants
+			}, {
+				'fs': vol,
+				'fs/promises': vol.promisesApi
 		})).default;		
 	});
 
 	afterEach(function() {
-		mockfs.restore();
+		vol.reset();
 	});
 
 	it('should throw if not exactly one file was extracted', async function() {
@@ -67,7 +69,7 @@ describe('updateGameParams', function() {
 	});
 
 	it('should check every game object against all invariants', async function() {
-		mockfs({
+		vol.fromNestedJSON({
 			[path.join(wowsdir, 'bin', String(buildno))]: {},
 			[dest]: {},
 		});
@@ -80,25 +82,26 @@ describe('updateGameParams', function() {
 	});
 
 	it('should turn GameParams.data from the game directory into .json', async function() {		
-		mockfs({
+		vol.fromNestedJSON({
 			[path.join(wowsdir, 'bin', String(buildno))]: {},
 			[dest]: {},
 		});
 
 		expect(await updateGameParams(wowsdir, dest, buildno)).to.be.ok;
 		for (let go of Object.values(expected)) {
-			expect(path.join(dest, 'params', `${go.name}.json`), go.name).to.be.a.file().with.contents(JSON.stringify(go));
-			expect(path.join(dest, 'params',`${go.index}.json`), go.index).to.be.a.file().with.contents(JSON.stringify(go));
-			expect(path.join(dest, 'params',`${go.id}.json`), go.id).to.be.a.file().with.contents(JSON.stringify(go));
+			await expect(vol.promisesApi.readFile(path.join(dest, 'params', `${go.name}.json`), 'utf8'), go.name).to.eventually.equal(JSON.stringify(go));
+			await expect(vol.promisesApi.readFile(path.join(dest, 'params', `${go.index}.json`), 'utf8'), go.index).to.eventually.equal(JSON.stringify(go));
+			await expect(vol.promisesApi.readFile(path.join(dest, 'params', `${go.id}.json`), 'utf8'), go.id).to.eventually.equal(JSON.stringify(go));
 		}
 	});
 
 	it('should delete the extracted files from the tmp folder', async function() {
-		mockfs({
+		vol.fromNestedJSON({
 			[path.join(wowsdir, 'bin', String(buildno))]: {},
 			[dest]: {},
 		});
 		await updateGameParams(wowsdir, dest, buildno);
-		expect(path.join(os.tmpdir(), 'content')).to.not.be.a.path();
+		
+		await expect(vol.promisesApi.stat(path.join(os.tmpdir(), 'content'))).to.be.rejectedWith(/ENOENT/);
 	});
 });

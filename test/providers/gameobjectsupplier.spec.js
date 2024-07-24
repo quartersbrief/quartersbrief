@@ -1,7 +1,6 @@
-import GameObjectSupplier from '../../src/providers/gameobjectsupplier.js';
-import mockfs from 'mock-fs';
+import { vol } from 'memfs';
+import esmock from 'esmock';
 import sinon from 'sinon';
-import fs from 'fs';
 import path from 'path';
 
 describe('GameObjectSupplier', function() {
@@ -18,8 +17,8 @@ describe('GameObjectSupplier', function() {
 				name: obj.name,
 				ext: '.json'
 			});
-			fs.writeFileSync(master, JSON.stringify(obj));
-			[ 'index', 'id' ].forEach(link => fs.linkSync(master, path.format({
+			vol.writeFileSync(master, JSON.stringify(obj));
+			[ 'index', 'id' ].forEach(link => vol.linkSync(master, path.format({
 				dir: SOURCEPATH,
 				name: obj[link],
 				ext: '.json'
@@ -27,19 +26,28 @@ describe('GameObjectSupplier', function() {
 		}
 	}
 
+	let GameObjectSupplier;
 	let gameObjectSupplier;
+
+	before(async function() {
+		GameObjectSupplier = (await esmock.strict('../../src/providers/gameobjectsupplier.js', {}, {
+			'fs': vol, 'fs/promises': vol.promisesApi
+		})).default;
+	});
 
 	beforeEach(function() {
 		gameObjectSupplier = new GameObjectSupplier(SOURCEPATH);
 	});
 	
 	beforeEach(function() {
-		mockfs({
+		vol.fromNestedJSON({
 			[SOURCEPATH]: {}
 		});
 	});
 
-	afterEach(mockfs.restore);
+	afterEach(function() { 
+		vol.reset();
+	});
 
 	describe('recovery', function() {
 

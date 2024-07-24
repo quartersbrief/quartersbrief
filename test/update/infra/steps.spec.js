@@ -1,9 +1,9 @@
-import { extract, readFile, writeJSON } from '../../../src/update/infra/steps.js';
+import { extract } from '../../../src/update/infra/steps.js';
 import os from 'os';
 import path from 'path';
 import { join } from 'path';
 import esmock from 'esmock';
-import mockfs from 'mock-fs';
+import { vol } from 'memfs';
 import sinon from 'sinon';
 
 describe('extract', function() {
@@ -132,6 +132,14 @@ describe('extract', function() {
 });
 
 describe('readFile', function() {
+	let readFile;
+
+	before(async function() {
+		readFile = (await esmock.strict('../../../src/update/infra/steps.js', {}, {
+			'fs': vol, 'fs/promises': vol.promisesApi
+		})).readFile;
+	});
+
 	it('should return a function', function() {
 		expect(readFile()).to.be.a('function');
 	});
@@ -143,7 +151,7 @@ describe('readFile', function() {
 		const contents = 'xyz';
 
 		beforeEach(function() {
-			mockfs({ [file]: contents });
+			vol.fromNestedJSON({ [file]: contents });
 		});
 
 		beforeEach(function() {
@@ -151,7 +159,7 @@ describe('readFile', function() {
 		});
 
 		afterEach(function() {
-			mockfs.restore()
+			vol.reset();
 		});
 
 		it('should read the file if one was supplied when created', function() {
@@ -173,6 +181,14 @@ describe('readFile', function() {
 });
 
 describe('writeJSON', function() {
+	let writeJSON;
+
+	before(async function() {
+		writeJSON = (await esmock.strict('../../../src/update/infra/steps.js', {}, {
+			'fs': vol, 'fs/promises': vol.promisesApi
+		})).writeJSON;
+	});
+
 	it('should return a function', function() {
 		expect(writeJSON()).to.be.a('function');
 	});
@@ -187,7 +203,7 @@ describe('writeJSON', function() {
 		const contents = { key: 'value' };
 
 		beforeEach(function() {
-			mockfs({ [path]: {} });
+			vol.fromNestedJSON({ [path]: {} });
 		});
 
 		beforeEach(function() {
@@ -195,34 +211,38 @@ describe('writeJSON', function() {
 		});
 
 		afterEach(function() {
-			mockfs.restore();
+			vol.reset();
 		});
 
 		it('should create the specified file if it doesn\'t exist and write the data as JSON', async function() {
 			expect(await writer(contents)).to.equal(file);
-			expect(file).to.be.a.file().with.content(JSON.stringify(contents));
+			await expect(vol.promisesApi.readFile(file, 'utf8')).to.eventually.equal(JSON.stringify(contents));
 		});
 
 		it('should overwrite the specified file if it exists and write the data as JSON', async function() {
-			mockfs({ [file]: JSON.stringify({})});
-			expect(file).to.be.a.file();
+			vol.fromNestedJSON({ [file]: JSON.stringify({})});
+			await expect(vol.promisesApi.stat(file)).to.be.fulfilled;
 
 			expect(await writer(contents)).to.equal(file);
-			expect(file).to.be.a.file().with.content(JSON.stringify(contents));
+			await expect(vol.promisesApi.readFile(file, 'utf8')).to.eventually.equal(JSON.stringify(contents));
 		});
 
 		it('should create parent directories if necessary', async function() {
 			const dirs = '/create/us';
 			writer = writeJSON(join(path, dirs, basename));
 			await writer({});
-			expect(join(path, dirs)).to.be.a.directory();
+			
+			const stats = vol.promisesApi.stat(join(path, dirs));
+			await expect(stats).to.be.fulfilled;
+			await expect((await stats).isDirectory()).to.be.true;
 		});
 
 		it('should support specifying the file as a function, and call that function with the data', async function() {
 			let fn = sinon.stub().returns(file);
 			writer = writeJSON(fn);
 			await writer(contents);
-			expect(file).to.be.a.file().with.contents(JSON.stringify(contents));
+					
+			await expect(vol.promisesApi.readFile(file, 'utf8')).to.eventually.equal(JSON.stringify(contents));
 			expect(fn).to.have.been.calledWith(contents);
 		});
 	});

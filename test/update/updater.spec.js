@@ -1,6 +1,6 @@
-import Updater from '../../src/update/updater.js';
 import path from 'path';
-import mockfs from 'mock-fs';
+import esmock from 'esmock';
+import { vol } from 'memfs';
 import sinon from 'sinon';
 import { setImmediate } from 'timers/promises';
 
@@ -8,14 +8,22 @@ describe('Updater', function() {
 	const wowsdir = '/wows';
 	const dest = '/data';
 
+	let Updater;
 	let updater;
+
+	before(async function() {
+		Updater = (await esmock.strict('../../src/update/updater.js', {}, {
+			'fs': vol,
+			'fs/promises': vol.promisesApi
+		})).default;
+	});
 
 	beforeEach(function() {
 		updater = new Updater(wowsdir, dest);
 	});
 
 	afterEach(function() {
-		mockfs.restore();
+		vol.reset();
 	});
 
 	describe('.detectVersion', function() {
@@ -27,13 +35,13 @@ describe('Updater', function() {
 			builds
 				.map(buildno => ({ [`${dir}/${buildno}`]: {} }))
 				.forEach(buildDir => Object.assign(bin, buildDir));
-			mockfs(bin);
+			vol.fromNestedJSON(bin);
 			return expect(updater.detectVersion(dir)).to.eventually.equal(expected);
 		});
 
 		it('should ignore files and subfolders not consisting only of digits', function() {
 			const buildno = 1;
-			mockfs({
+			vol.fromNestedJSON({
 				[`${dir}/${buildno}`]: {},
 				[`${dir}/alphanumeric dir`]: {},
 				[`${dir}/alphanumeric file`]: '',
@@ -43,7 +51,7 @@ describe('Updater', function() {
 		});
 
 		it('should return undefined if there are no numerically-named subfolders', async function() {
-			mockfs({
+			vol.fromNestedJSON({
 				[dir]: {}
 			});
 			return expect(updater.detectVersion(dir)).to.eventually.be.undefined;
@@ -84,19 +92,19 @@ describe('Updater', function() {
 		it('should remove the data directory of the old version and keep the data directory for the new version', async function() {
 			const oldVersion = 1;
 			const newVersion = 2;
-			mockfs({ 
+			vol.fromNestedJSON({ 
 				[path.join(dest, String(oldVersion))]: {}, 
 				[path.join(dest, String(newVersion))]: {}, 
 			});
 	
 			await updater.commit(oldVersion);
-			expect(path.join(dest, String(oldVersion))).to.not.be.a.path();
-			expect(path.join(dest, String(newVersion))).to.be.a.directory();
+			await expect(vol.promisesApi.stat(path.join(dest, String(oldVersion)))).to.be.rejectedWith(/ENOENT/);
+			await expect(vol.promisesApi.stat(path.join(dest, String(newVersion)))).to.be.fulfilled;
 		});
 
 		it('should not error if there is no data directory for the old version', async function() {
 			const oldVersion = 1;
-			mockfs({
+			vol.fromNestedJSON({
 				[dest]: {}
 			});
 			return expect(updater.commit(oldVersion)).to.be.fulfilled;
@@ -107,14 +115,15 @@ describe('Updater', function() {
 		it('should remove the data directory for the new version and keep the data directory for the old version', async function() {
 			const newVersion = 2;
 			const oldVersion = 1;
-			mockfs({ 
+			vol.fromNestedJSON({ 
 				[path.join(dest, String(oldVersion))]: {}, 
 				[path.join(dest, String(newVersion))]: {}, 
 			});
 
 			await updater.rollback(newVersion);
-			expect(path.join(dest, String(oldVersion))).to.be.directory();
-			expect(path.join(dest, String(newVersion))).to.not.be.a.path();
+			
+			await expect(vol.promisesApi.stat(path.join(dest, String(oldVersion)))).to.be.fulfilled;
+			await expect(vol.promisesApi.stat(path.join(dest, String(newVersion)))).to.be.rejectedWith(/ENOENT/);
 		});
 	});
 
@@ -127,7 +136,7 @@ describe('Updater', function() {
 		});
 
 		beforeEach(function() {
-			mockfs({
+			vol.fromNestedJSON({
 				[path.join(wowsdir, 'bin', String(detected), 'idx')]: {},
 				[path.join(dest, String(remembered))]: {}
 			});
